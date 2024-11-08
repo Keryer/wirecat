@@ -11,6 +11,7 @@ class PacketCaptureGUI:
         self.master.geometry("700x500")
 
         self.filter = tk.StringVar()
+        self.filter.set("tcp")
         self.filename = "capture.pcap"
         self.packets = []
 
@@ -25,13 +26,20 @@ class PacketCaptureGUI:
         self.start_button = tk.Button(master, text="开始抓包", command=self.start_capture)
         self.start_button.pack(pady=10)
 
-        # 停止抓包按钮
-        self.stop_button = tk.Button(master, text="停止抓包", command=self.stop_capture, state=tk.DISABLED)
-        self.stop_button.pack(pady=5)
+
+        # 开始抓包按钮
+        self.stop_button = tk.Button(master, text="停止抓包", command=self.stop_capture)
+        self.stop_button.pack(pady=10)
+
 
         # 保存抓包按钮
         self.save_button = tk.Button(master, text="保存抓包", command=self.save_capture, state=tk.DISABLED)
         self.save_button.pack(pady=5)
+
+
+        # 清空抓包按钮
+        self.clear_button = tk.Button(master, text="清空抓包", command=self.clear_packets, state=tk.DISABLED)
+        self.clear_button.pack(pady=5)
 
         # 数据包显示区域
         self.packet_display = tk.Listbox(master, width=80, height=10)
@@ -50,22 +58,29 @@ class PacketCaptureGUI:
         """ 抓包回调函数 """
         if self.capturing:
             self.packets.append(pkt)
+            packet_number = len(self.packets)
             protocol_name = "HTTP" if pkt.haslayer(Raw) and (b'GET' in bytes(pkt[Raw]) or b'POST' in bytes(pkt[Raw]) or b'HTTP' in bytes(pkt[Raw])) else ""
-            summary = pkt.summary() + (f" ({protocol_name})" if protocol_name else "")
+            summary = f"{packet_number}. " + pkt.summary() + (f" ({protocol_name})" if protocol_name else "")
             self.packet_display.insert(tk.END, summary)
 
     def start_capture(self):
         """ 开始抓包，启动一个新的线程进行抓包 """
+        # 确保之前的抓包停止
+        self.stop_capture()
+
         self.capturing = True
         self.status_label.config(text="状态：抓包中...")
         self.start_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL)
+        self.clear_button.config(state=tk.DISABLED)
         self.save_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.NORMAL)
+
+        self.current_filter = self.filter.get()
 
         # 启动抓包线程
-        capture_thread = threading.Thread(target=self.capture_packets)
-        capture_thread.daemon = True
-        capture_thread.start()
+        self.capture_thread = threading.Thread(target=self.capture_packets)
+        self.capture_thread.daemon = True
+        self.capture_thread.start()
 
     def stop_capture(self):
         """ 停止抓包 """
@@ -73,12 +88,25 @@ class PacketCaptureGUI:
         self.status_label.config(text="状态：抓包已停止")
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
+        self.clear_button.config(state=tk.NORMAL)
         self.save_button.config(state=tk.NORMAL)
+        self.save_button.config(state=tk.NORMAL)
+        self.clear_button.config(state=tk.NORMAL)
 
     def capture_packets(self):
         """ 在后台进行数据包抓取 """
-        filter = self.filter.get()
-        sniff(prn=self.packet_callback, filter=filter, store=0)
+        filter = self.current_filter
+        # 只允许合法的过滤器表达式（tcp、udp、icmp、ip）
+        if filter not in ["tcp", "udp", "icmp", "ip"]:
+            filter = None
+        sniff(prn=self.packet_callback, filter=filter, store=0, stop_filter=lambda x: not self.capturing)
+
+    def clear_packets(self):
+        """ 清空已捕获的数据包 """
+        self.packets.clear()
+        self.packet_display.delete(0, tk.END)
+        self.clear_button.config(state=tk.DISABLED)
+        self.save_button.config(state=tk.DISABLED)
 
     def save_capture(self):
         """ 保存抓包到文件 """
